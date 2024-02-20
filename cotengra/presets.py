@@ -56,8 +56,9 @@ class AutoOptimizer(PathOptimizer):
         self.kwargs.setdefault("max_time", "rate:1e9")
         self.kwargs.setdefault("parallel", False)
         self.kwargs.setdefault("reconf_opts", {})
-        self.kwargs["reconf_opts"].setdefault("subtree_size", 4)
-        self.kwargs["reconf_opts"].setdefault("maxiter", 100)
+        if self.kwargs["reconf_opts"] is not None:
+            self.kwargs["reconf_opts"].setdefault("subtree_size", 4)
+            self.kwargs["reconf_opts"].setdefault("maxiter", 100)
 
         self._hyperoptimizers_by_thread = {}
         if cache:
@@ -136,13 +137,28 @@ class AutoHQOptimizer(AutoOptimizer):
         kwargs.setdefault("max_time", "rate:1e8")
         kwargs.setdefault("parallel", False)
         kwargs.setdefault("reconf_opts", {})
-        kwargs["reconf_opts"].setdefault("subtree_size", 8)
-        kwargs["reconf_opts"].setdefault("maxiter", 500)
+        if kwargs["reconf_opts"] is not None:
+            kwargs["reconf_opts"].setdefault("subtree_size", 8)
+            kwargs["reconf_opts"].setdefault("maxiter", 500)
+        super().__init__(**kwargs)
+
+
+class AutoNoReconfOptimizer(AutoOptimizer):
+    def __init__(self, **kwargs):
+        kwargs.setdefault("reconf_opts", None)
+        super().__init__(**kwargs)
+
+
+class AutoHQNoReconfOptimizer(AutoHQOptimizer):
+    def __init__(self, **kwargs):
+        kwargs.setdefault("reconf_opts", None)
         super().__init__(**kwargs)
 
 
 auto_optimize = AutoOptimizer()
 auto_hq_optimize = AutoHQOptimizer()
+auto_no_reconf_optimize = AutoNoReconfOptimizer()
+auto_hq_no_reconf_optimize = AutoHQNoReconfOptimizer()
 greedy_optimize = GreedyOptimizer()
 optimal_optimize = OptimalOptimizer()
 optimal_outer_optimize = OptimalOptimizer(search_outer=True)
@@ -151,6 +167,8 @@ optimal_outer_optimize = OptimalOptimizer(search_outer=True)
 # these names overlap with opt_einsum, but won't override presets there
 register_preset("auto", auto_optimize)
 register_preset("auto-hq", auto_hq_optimize)
+register_preset("auto-no-reconf", auto_no_reconf_optimize)
+register_preset("auto-hq-no-reconf", auto_hq_no_reconf_optimize)
 register_preset("greedy", greedy_optimize)
 register_preset("eager", greedy_optimize)
 register_preset("opportunistic", greedy_optimize)
