@@ -3159,8 +3159,8 @@ class PartitionTreeBuilder:
         cutoff=10,
         parts=2,
         parts_decay=0.5,
-        sub_optimize="auto",
-        super_optimize="auto-hq",
+        sub_optimize="auto-no-reconf",
+        super_optimize="auto-hq-no-reconf",
         check=False,
         **partition_opts,
     ):
