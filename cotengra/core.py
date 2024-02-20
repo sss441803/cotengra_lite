@@ -3,6 +3,7 @@
 import collections
 import functools
 import itertools
+import copy
 import math
 import operator
 import random
@@ -1685,6 +1686,149 @@ class ContractionTree:
     subtree_reconfigure_forest_ = functools.partialmethod(
         subtree_reconfigure_forest, inplace=True
     )
+
+
+    # Modified from ArTensor
+    def determine_old_order(self, branch, leaves):
+        """
+        Given subroot and subtree, determine the order of it, only useful when the subtree size is 3
+        """
+        branch_left, branch_right = self.children[branch]
+        first_contract = sorted((leaves.index(branch_left), leaves.index(branch_right)))
+        if first_contract == [0, 2]:
+            return [[0,2], [0,1]]
+        elif first_contract == [0, 1]:
+            return [[0,1], [0,1]]
+        else:
+            assert first_contract == [1, 2]
+            return [[1,2], [0,1]]
+        
+
+    def tree_update(self, sub_root, subtree_search, beta, minimize):
+
+        scorer = get_score_fn(minimize)
+        node_cost = getattr(scorer, "cost_local_tree_node", lambda _: 2)
+
+        # see if sub_root is a leaf node
+        if sub_root not in self.children:
+            return
+
+        # get a subtree to possibly reconfigure
+        sub_leaves, sub_branches = self.get_subtree(
+            sub_root, size=3, search=subtree_search
+        )
+
+        if len(sub_leaves) > 2:
+            
+            # get new contractio order
+            old_sub_leaves = copy.deepcopy(sub_leaves)
+            order_old = self.determine_old_order(sub_branches[1], sub_leaves)
+            order_pool = [[[0,2], [0,1]], [[0,1],[0,1]], [[1,2],[0,1]]]
+            order_pool.remove(order_old)
+            order_new = random.choice(order_pool)
+
+            # calculate current cost
+            current_cost = node_cost(self, sub_root)
+            for node in sub_branches:
+                if minimize == "size":
+                    current_cost = max(current_cost, node_cost(self, node))
+                else:
+                    current_cost += node_cost(self, node)
+                self._remove_node(node)
+
+            # calculate new cost
+            self.contract_nodes(sub_leaves, optimize=order_new)
+            sub_branches = [sub_leaves[0].union(sub_leaves[1]).union(sub_leaves[2]), sub_leaves[order_new[0][0]].union(sub_leaves[order_new[0][1]])]
+            new_cost = node_cost(self, sub_root)
+            for node in sub_branches:
+                if minimize == "size":
+                    new_cost = max(new_cost, node_cost(self, node))
+                else:
+                    new_cost += node_cost(self, node)
+                self._remove_node(node)
+
+            # possibly apply new order
+            if random.random() < math.exp(-beta * (math.log2(new_cost) - math.log2(current_cost))):
+                # print('Apply change, ', math.log2(new_cost), math.log2(current_cost), math.exp(-beta * (math.log2(new_cost) - math.log2(current_cost))))
+                self.contract_nodes(sub_leaves, optimize=order_new)
+            else:
+                # print('No change, ', math.log2(new_cost), math.log2(current_cost), math.exp(-beta * (math.log2(new_cost) - math.log2(current_cost))))
+                self.contract_nodes(old_sub_leaves, optimize=order_old)
+
+            for next_root in self.children[sub_root]:
+                self.tree_update(next_root, subtree_search, beta, minimize)
+
+
+    def simulated_annealing(
+        self,
+        beta,
+        subtree_search="bfs",
+        maxiter=500,
+        seed=None,
+        minimize="flops",
+        inplace=False,
+        progbar=False,
+    ):
+        """Reconfigure subtrees of this tree with locally optimal paths.
+
+        Parameters
+        ----------
+        beta : float
+            Temperature parameter of simulated annealing.
+        subtree_search : {'bfs', 'dfs', 'random'}, optional
+            How to build the subtrees:
+
+                - 'bfs': breadth-first-search creating balanced subtrees
+                - 'dfs': depth-first-search creating imbalanced subtrees
+                - 'random': random subtree building
+        maxiter : int, optional
+            How many subtree optimizations to perform, the algorithm can
+            terminate before this if all subtrees have been optimized.
+        seed : int, optional
+            A random seed (seeds python system random module).
+        minimize : {'flops', 'size'}, optional
+            Whether to minimize with respect to contraction flops or size.
+        inplace : bool, optional
+            Whether to perform the reconfiguration inplace or not.
+        progbar : bool, optional
+            Whether to show live progress of the reconfiguration.
+
+        Returns
+        -------
+        ContractionTree
+        """
+        tree = self if inplace else self.copy()
+        # ensure these have been computed and thus are being tracked
+        tree.contract_stats()
+
+        if seed is not None:
+            random.seed(seed)
+
+        if progbar:
+            import tqdm
+            pbar = tqdm.tqdm()
+            pbar.set_description(_describe_tree(tree), refresh=False)
+
+        r = 0
+        try:
+            while r < maxiter:
+                
+                sub_root = tree.root
+                self.tree_update(sub_root, subtree_search, beta, minimize)
+                r += 1
+
+                if progbar:
+                    pbar.update()
+                    pbar.set_description(_describe_tree(tree), refresh=False)
+
+        finally:
+            if progbar:
+                pbar.close()
+
+        # invalidate any compiled contractions
+        tree.contraction_cores.clear()
+
+        return tree
 
     def slice(
         self,
